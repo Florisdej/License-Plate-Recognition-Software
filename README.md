@@ -1,4 +1,3 @@
-Markdown
 ## Quick Start op Raspberry Pi
 
 1. **Systeem Dependencies:**
@@ -27,4 +26,4 @@ python3 src/App_Pi.py
 
 **Tip voor de Pi:** Omdat je in je screenshot ziet dat OpenCV soms de camera niet kan vinden (`OpenCV: camera failed to properly initialize!`), is het goed om in je README ook te vermelden dat de camera-interface in `sudo raspi-config` aan moet staan.
 
-**Zal ik de `App_Pi.py` code voor je nakijken om te zien of we een 'fallback' kunnen inbouwen voor als de camera niet direct reageert?**
+
