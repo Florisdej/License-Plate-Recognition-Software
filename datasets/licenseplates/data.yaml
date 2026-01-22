@@ -1,6 +1,0 @@
-path: /Users/florisdejager/Documents/License Plate Recognision Software/datasets/licenseplates
-train: /Users/florisdejager/Documents/License Plate Recognision Software/datasets/licenseplates/images/train
-val: /Users/florisdejager/Documents/License Plate Recognision Software/datasets/licenseplates/images/val
-test: /Users/florisdejager/Documents/License Plate Recognision Software/datasets/licenseplates/images/test
-names:
-  0: license_plate
