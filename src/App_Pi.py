@@ -14,10 +14,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR) if os.path.basename(SCRIPT_DIR) == "src" else SCRIPT_DIR
 
 import cv2
+import time
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, 
     QFileDialog, QTableWidget, QTableWidgetItem, QHeaderView, QProgressBar,
-    QFrame, QSizePolicy, QSlider, QStyle, QCheckBox, QSpinBox
+    QFrame, QSizePolicy, QSlider, QStyle, QCheckBox, QSpinBox, QComboBox
 )
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from PyQt6.QtCore import Qt, QSize, QTimer
@@ -56,6 +57,16 @@ class LicensePlateAppPi(QWidget):
         self.frame_skip_counter = 0
         self.frame_skip_interval = 2  # Process every Nth frame (adjustable)
         self.max_display_width = 640  # Reduce display size for performance
+        
+        # Camera Settings
+        self.max_camera_index = 1  # Scan camera indices 0-1 (Mac typically has 0-1)
+        self.available_cameras = []  # List of (index, name) tuples
+        self.current_camera_index = 0
+        self.camera_retry_attempts = 3
+        self.camera_retry_delay = 0.5  # seconds between retries
+        
+        # Scan for available cameras at startup
+        self.scan_cameras()
         
         self.setup_ui()
         self.apply_styles()
@@ -169,6 +180,24 @@ class LicensePlateAppPi(QWidget):
         self.camera_button.clicked.connect(self.toggle_camera)
         right_panel.addWidget(self.camera_button)
 
+        # Camera Selection Section
+        camera_select_layout = QHBoxLayout()
+        camera_select_layout.addWidget(QLabel("Camera:"))
+        
+        self.camera_combobox = QComboBox()
+        self.camera_combobox.setMinimumWidth(120)
+        self.populate_camera_combobox()
+        self.camera_combobox.currentIndexChanged.connect(self.on_camera_selection_changed)
+        camera_select_layout.addWidget(self.camera_combobox)
+        
+        self.refresh_cameras_button = QPushButton("🔄")
+        self.refresh_cameras_button.setToolTip("Scan for cameras")
+        self.refresh_cameras_button.setMaximumWidth(40)
+        self.refresh_cameras_button.clicked.connect(self.refresh_cameras)
+        camera_select_layout.addWidget(self.refresh_cameras_button)
+        
+        right_panel.addLayout(camera_select_layout)
+
         self.detect_button = QPushButton("Detect License Plate")
         self.detect_button.setIcon(QIcon.fromTheme("system-search"))
         self.detect_button.clicked.connect(self.run_detection)
@@ -227,6 +256,7 @@ class LicensePlateAppPi(QWidget):
         self.load_video_button.setStyleSheet(ModernStyles.get_button_style(is_primary=False))
         self.camera_button.setStyleSheet(ModernStyles.get_button_style(is_primary=False))
         self.detect_button.setStyleSheet(ModernStyles.get_button_style(is_primary=True))
+        self.refresh_cameras_button.setStyleSheet(ModernStyles.get_button_style(is_primary=False))
         
         # Playback controls styling
         self.play_button.setStyleSheet(ModernStyles.get_button_style(is_primary=True))
@@ -303,14 +333,178 @@ class LicensePlateAppPi(QWidget):
             # Disable manual detect button during video
             self.detect_button.setEnabled(False)
 
+    def scan_cameras(self):
+        """Scan for available cameras (indices 0 through max_camera_index)."""
+        self.available_cameras = []
+        print(f"[DEBUG] Scanning cameras 0-{self.max_camera_index}...")
+        
+        for index in range(self.max_camera_index + 1):
+            print(f"[DEBUG] Checking camera index {index}...")
+            cap = cv2.VideoCapture(index)
+            if cap.isOpened():
+                # Try to read a frame to verify camera is working
+                ret, frame = cap.read()
+                print(f"[DEBUG] Camera {index}: isOpened=True, read={ret}, frame={'OK' if frame is not None else 'None'}")
+                if ret and frame is not None:
+                    # Get camera info if available
+                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    camera_name = f"Camera {index} ({width}x{height})"
+                    self.available_cameras.append((index, camera_name))
+                    print(f"[DEBUG] Added camera: {camera_name}")
+                cap.release()
+            else:
+                print(f"[DEBUG] Camera {index}: isOpened=False")
+        
+        # Set default camera index if cameras found
+        if self.available_cameras:
+            self.current_camera_index = self.available_cameras[0][0]
+            print(f"[DEBUG] Default camera set to index {self.current_camera_index}")
+        else:
+            print("[DEBUG] No cameras found!")
+        
+        return self.available_cameras
+
+    def populate_camera_combobox(self):
+        """Populate the camera dropdown with available cameras."""
+        self.camera_combobox.blockSignals(True)
+        self.camera_combobox.clear()
+        
+        if self.available_cameras:
+            for index, name in self.available_cameras:
+                self.camera_combobox.addItem(name, index)
+        else:
+            self.camera_combobox.addItem("Geen camera's gevonden", -1)
+        
+        self.camera_combobox.blockSignals(False)
+
+    def refresh_cameras(self):
+        """Refresh the list of available cameras."""
+        self.status_label.setText("Scanning for cameras...")
+        QApplication.processEvents()
+        
+        # Stop current camera if active
+        was_active = self.is_camera_active
+        if was_active:
+            self.reset_mode()
+        
+        # Rescan cameras
+        self.scan_cameras()
+        self.populate_camera_combobox()
+        
+        if self.available_cameras:
+            camera_count = len(self.available_cameras)
+            self.status_label.setText(f"Found {camera_count} camera(s)")
+        else:
+            self.status_label.setText("No cameras found")
+
+    def on_camera_selection_changed(self, index):
+        """Handle camera selection change in dropdown."""
+        if index >= 0:
+            camera_index = self.camera_combobox.itemData(index)
+            if camera_index is not None and camera_index >= 0:
+                self.current_camera_index = camera_index
+                
+                # If camera is currently active, switch to new camera
+                if self.is_camera_active:
+                    self.switch_camera(camera_index)
+
+    def switch_camera(self, camera_index):
+        """Switch to a different camera while live feed is active."""
+        # Stop current capture
+        self.timer.stop()
+        if self.cap:
+            self.cap.release()
+            self.cap = None
+        
+        # Try to open new camera with retry logic
+        success = self.open_camera_with_retry(camera_index)
+        
+        if success:
+            self.timer.start(100)
+            self.status_label.setText(f"Switched to Camera {camera_index}")
+        else:
+            self.show_camera_error()
+            self.is_camera_active = False
+            self.camera_button.setText("Start Live Feed")
+
+    def open_camera_with_retry(self, camera_index):
+        """Try to open a camera with retry logic.
+        
+        Returns True if successful, False otherwise.
+        """
+        for attempt in range(self.camera_retry_attempts):
+            self.cap = cv2.VideoCapture(camera_index)
+            
+            if self.cap.isOpened():
+                # Verify by reading a test frame
+                ret, _ = self.cap.read()
+                if ret:
+                    return True
+                else:
+                    self.cap.release()
+            
+            # Wait before retry
+            if attempt < self.camera_retry_attempts - 1:
+                time.sleep(self.camera_retry_delay)
+        
+        return False
+
+    def show_camera_error(self):
+        """Display 'Camera niet gevonden' message in the video window."""
+        # Create a black image with error message
+        error_img = self.create_error_image("Camera niet gevonden")
+        self.display_image(error_img)
+        self.status_label.setText("Error: Camera niet gevonden")
+
+    def create_error_image(self, message):
+        """Create a black image with centered error message."""
+        import numpy as np
+        
+        # Create black image
+        height, width = 360, 480
+        img = np.zeros((height, width, 3), dtype=np.uint8)
+        
+        # Add text
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.8
+        color = (100, 100, 255)  # Light red/orange
+        thickness = 2
+        
+        # Get text size for centering
+        (text_width, text_height), _ = cv2.getTextSize(message, font, font_scale, thickness)
+        x = (width - text_width) // 2
+        y = (height + text_height) // 2
+        
+        cv2.putText(img, message, (x, y), font, font_scale, color, thickness)
+        
+        return img
+
     def toggle_camera(self):
         if not self.is_camera_active:
             # Switching to camera
             self.reset_mode()
             
-            self.cap = cv2.VideoCapture(0)
-            if not self.cap.isOpened():
-                self.status_label.setText("Error: Could not open camera.")
+            # Check if we have cameras available
+            if not self.available_cameras:
+                self.show_camera_error()
+                return
+            
+            # Get selected camera index from dropdown
+            selected_index = self.camera_combobox.currentIndex()
+            if selected_index >= 0:
+                camera_index = self.camera_combobox.itemData(selected_index)
+                if camera_index is not None and camera_index >= 0:
+                    self.current_camera_index = camera_index
+            
+            # Try to open camera with retry logic
+            self.status_label.setText("Opening camera...")
+            QApplication.processEvents()
+            
+            success = self.open_camera_with_retry(self.current_camera_index)
+            
+            if not success:
+                self.show_camera_error()
                 return
             
             # Slower timer for Pi (100ms = 10 FPS max)
@@ -320,7 +514,7 @@ class LicensePlateAppPi(QWidget):
             self.load_button.setEnabled(False)
             self.load_video_button.setEnabled(False)
             self.detect_button.setEnabled(False)
-            self.status_label.setText("Live feed active")
+            self.status_label.setText(f"Live feed active (Camera {self.current_camera_index})")
         else:
             # Stopping camera
             self.reset_mode()
@@ -350,10 +544,12 @@ class LicensePlateAppPi(QWidget):
 
     def update_frame(self, single_step=False):
         if not self.cap:
+            print("[DEBUG] update_frame: cap is None")
             return
 
         ret, frame = self.cap.read()
-        if ret:
+        print(f"[DEBUG] update_frame: ret={ret}, frame={'OK' if frame is not None else 'None'}")
+        if ret and frame is not None:
             # Update slider if playing video file
             if self.is_video_file_active and not single_step:
                 current_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))

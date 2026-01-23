@@ -16,9 +16,13 @@ class ModernStyles:
         "table_alt_row": "#2a2a2a"
     }
 
+    # Cross-platform font families
+    # DejaVu Sans is pre-installed on Raspberry Pi OS and most Linux distributions
+    # Liberation Sans is a free alternative to Arial
+    # 'sans-serif' is the final fallback for any system
     FONTS = {
-        "main": "Segoe UI, Helvetica Neue, sans-serif",
-        "mono": "Consolas, Monaco, monospace"
+        "main": "DejaVu Sans, Liberation Sans, FreeSans, Arial, sans-serif",
+        "mono": "DejaVu Sans Mono, Liberation Mono, FreeMono, Courier New, monospace"
     }
 
     @staticmethod
