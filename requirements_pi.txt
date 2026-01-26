@@ -1,0 +1,20 @@
+# Requirements for Raspberry Pi 4 License Plate Recognition
+# Installation: pip install -r requirements_pi.txt
+
+# Core Computer Vision
+opencv-python-headless>=4.8.0  # Headless version for Pi (smaller, no GUI deps)
+
+# YOLO / Ultralytics (includes OpenVINO support)
+ultralytics>=8.0.0
+
+# OpenVINO Runtime for optimized inference on Pi
+openvino>=2023.0.0
+
+# GUI Framework
+PyQt6>=6.5.0
+
+# Numerical computing
+numpy>=1.24.0
+
+# Optional: For advanced tracking algorithms
+scipy>=1.11.0
