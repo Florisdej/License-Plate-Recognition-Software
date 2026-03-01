@@ -49,6 +49,11 @@ BINARIZE_C = 9                  # Constante afgetrokken van gemiddelde
 OCR_LANGUAGES = ["en"]          # Talen voor OCR ('en' werkt goed voor EU-kentekens)
 OCR_GPU = False                 # GPU gebruiken (False voor Raspberry Pi)
 OCR_CONFIDENCE_MIN = 0.2        # Minimale OCR confidence om resultaat te accepteren
+REQUIRE_NL_PATTERN = True       # Verwerp resultaten die niet op een geldig NL-kentekenpatroon lijken
+OCR_TEXT_THRESHOLD = 0.3        # EasyOCR tekst-drempel (lager = meer recall bij wazig beeld)
+
+# Scherptedrempel voor live camera (Laplacian-variantie); 0 = uitgeschakeld
+SHARPNESS_MIN_VARIANCE = 80.0
 
 # Toegestane tekens voor kentekens (letters + cijfers + streepje)
 PLATE_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
@@ -56,7 +61,7 @@ PLATE_CHARACTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
 # === Kleurfilter ===
 COLOR_FILTER_ENABLED = False    # True = filter op kleur, False = toon alles (kleurlabel blijft zichtbaar)
 PLATE_MODE = "all"              # "blue", "yellow", of "all"
-VEHICLE_MODE = "both"           # "car", "scooter", "both"
+VEHICLE_MODE = "car"           # "car", "scooter", "both"
 COLOR_THRESHOLD = 0.3           # Min. percentage pixels om kleur toe te wijzen (0.0–1.0)
 
 # === Video ===

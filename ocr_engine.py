@@ -5,9 +5,11 @@ EasyOCR-integratie voor het uitlezen van kentekentekst uit gecropte afbeeldingen
 Bevat postprocessing specifiek voor Nederlandse/Europese kentekens.
 """
 
+import collections
 import logging
 import re
 import numpy as np
+import cv2
 from typing import Optional, Tuple
 import easyocr
 import config
@@ -56,6 +58,9 @@ class PlateOCR:
         (re.compile(r"^[A-Z]{2}-?[A-Z]{2}-?\d{2}$"),    "XX-XX-99"),
     ]
 
+    # Maximale grootte van de OCR-resultaatcache
+    _CACHE_MAX_SIZE = 128
+
     def __init__(self):
         logger.info("[OCR] EasyOCR initialiseren (talen: %s)...", config.OCR_LANGUAGES)
         logger.info("[OCR] GPU: %s", config.OCR_GPU)
@@ -72,7 +77,46 @@ class PlateOCR:
                 "Controleer OCR_LANGUAGES en OCR_GPU in config.py."
             ) from e
 
+        self._ocr_cache = collections.OrderedDict()
+
         logger.info("[OCR] EasyOCR gereed")
+
+    def _compute_phash(self, image: np.ndarray) -> int:
+        """
+        Bereken een perceptuele hash (average hash) van een afbeelding.
+
+        Resize naar 8x8 grayscale, vergelijk elke pixel met het gemiddelde
+        en codeer als 64-bit integer.
+
+        Args:
+            image: Input afbeelding (grayscale of BGR)
+
+        Returns:
+            64-bit integer hash
+        """
+        # Converteer naar grayscale als nodig
+        if len(image.shape) == 3:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = image
+
+        # Resize naar 8x8
+        resized = cv2.resize(gray, (8, 8), interpolation=cv2.INTER_LINEAR)
+
+        # Bereken gemiddelde pixelwaarde
+        mean_val = resized.mean()
+
+        # Maak 64-bit hash: bit=1 als pixel > gemiddelde
+        phash = 0
+        for pixel in resized.flatten():
+            phash = (phash << 1) | (1 if pixel > mean_val else 0)
+
+        return phash
+
+    def clear_cache(self):
+        """Wis de OCR-resultaatcache."""
+        self._ocr_cache.clear()
+        logger.debug("[OCR] Cache gewist")
 
     def read_plate(self, plate_image: np.ndarray) -> Tuple[str, float]:
         """
@@ -93,7 +137,7 @@ class PlateOCR:
             detail=1,            # Geeft bbox, tekst, confidence
             paragraph=False,      # Geen paragraaf-groepering
             min_size=10,
-            text_threshold=0.5,
+            text_threshold=config.OCR_TEXT_THRESHOLD,
             low_text=0.3,
             width_ths=0.7,
         )
@@ -114,10 +158,10 @@ class PlateOCR:
             h = abs(bbox[2][1] - bbox[1][1])
             if h > max_height:
                 max_height = h
-            
+
             # Bereken centrum x-positie voor sortering
             center_x = (bbox[0][0] + bbox[1][0]) / 2
-            
+
             candidates.append({
                 "text": text,
                 "conf": conf,
@@ -130,34 +174,32 @@ class PlateOCR:
             return "", 0.0
 
 
-        
-
 
 
 
         # Stap 2: Filter ruis & Sorteer
         final_pieces = []
-        
+
         # Functie om items te sorteren op 'leesvolgorde'
         def sort_reading_order(items):
             if not items: return []
             items.sort(key=lambda i: i["bbox"][0][1]) # Sorteer op Y
-            
+
             lines = []
             current_line = [items[0]]
-            
+
             for item in items[1:]:
                 prev = current_line[-1]
                 y_diff = abs(item["bbox"][0][1] - prev["bbox"][0][1])
                 h_avg = (item["height"] + prev["height"]) / 2
-                
-                if y_diff < (h_avg * 0.5): 
+
+                if y_diff < (h_avg * 0.5):
                     current_line.append(item)
                 else:
                     lines.append(current_line)
                     current_line = [item]
             lines.append(current_line)
-            
+
             result = []
             for line in lines:
                 line.sort(key=lambda i: i["x"])
@@ -165,7 +207,7 @@ class PlateOCR:
             return result
 
         candidates = sort_reading_order(candidates)
-        
+
         # Bepaal drempel voor "grote" tekst
         thresh_factor = 0.5 if config.VEHICLE_MODE == "scooter" else 0.6
         min_height = max_height * thresh_factor
@@ -173,7 +215,7 @@ class PlateOCR:
         for item in candidates:
             text = item["text"].strip().upper()
             h = item["height"]
-            
+
             if config.VERBOSE:
                 logger.debug("[OCR] Kandidaat: '%s', Hoogte: %.1f (Max: %.1f, Min: %.1f)",
                              text, h, max_height, min_height)
@@ -228,6 +270,19 @@ class PlateOCR:
         Returns:
             Beste (kentekentekst, confidence_score) uit alle varianten
         """
+        if not variants:
+            return "", 0.0
+
+        # Bereken perceptuele hash van de eerste variant (alle varianten
+        # zijn afgeleid van dezelfde kentekenplaat)
+        phash = self._compute_phash(variants[0])
+
+        # Controleer cache
+        if phash in self._ocr_cache:
+            logger.debug("[OCR] Cache hit voor phash %s", phash)
+            self._ocr_cache.move_to_end(phash)
+            return self._ocr_cache[phash]
+
         best_text = ""
         best_conf = 0.0
 
@@ -235,7 +290,7 @@ class PlateOCR:
             text, conf = self.read_plate(variant)
 
             # Geef bonus aan resultaten die matchen met NL-kentekenpatronen
-            if self._matches_nl_pattern(text):
+            if self.matches_nl_pattern(text):
                 conf += 0.15  # Bonus voor geldig patroon
 
             if conf > best_conf and len(text) >= 4:
@@ -243,10 +298,18 @@ class PlateOCR:
                 best_conf = conf
 
                 # Vroeg stoppen: hoog vertrouwen + geldig NL-patroon, verdere varianten overbodig
-                if best_conf >= 0.7 and self._matches_nl_pattern(best_text):
+                if best_conf >= 0.7 and self.matches_nl_pattern(best_text):
                     break
 
-        return best_text, min(best_conf, 1.0)
+        result = (best_text, min(best_conf, 1.0))
+
+        # Sla resultaat op in cache
+        self._ocr_cache[phash] = result
+        self._ocr_cache.move_to_end(phash)
+        if len(self._ocr_cache) > self._CACHE_MAX_SIZE:
+            self._ocr_cache.popitem(last=False)
+
+        return result
 
     def _clean_plate_text(self, raw_text: str) -> str:
         """
@@ -322,7 +385,7 @@ class PlateOCR:
 
         return clean
 
-    def _matches_nl_pattern(self, text: str) -> bool:
+    def matches_nl_pattern(self, text: str) -> bool:
         """Controleer of tekst overeenkomt met een bekend NL-kentekenpatroon."""
         clean = text.replace("-", "").replace(" ", "")
         for pattern, _ in self.NL_PLATE_PATTERNS:

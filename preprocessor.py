@@ -38,6 +38,22 @@ class PlatePreprocessor:
 
         self.steps = config.PREPROCESSING
 
+    @staticmethod
+    def measure_sharpness(image: np.ndarray) -> float:
+        """
+        Meet de scherpte van een afbeelding via de Laplacian-variantie.
+
+        Hogere waarde = scherper beeld. Nuttig als filter voor wazige live-cameraframes.
+
+        Args:
+            image: Afbeelding (BGR of grayscale)
+
+        Returns:
+            Laplacian-variantie (float). Waarden < 80 duiden op wazigheid.
+        """
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+        return float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
     def process(self, plate_image: np.ndarray) -> np.ndarray:
         """
         Voer de volledige preprocessingpipeline uit.

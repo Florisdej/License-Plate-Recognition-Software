@@ -25,6 +25,7 @@ Gebruik:
 """
 
 import argparse
+import logging
 import sys
 import time
 from pathlib import Path
@@ -34,6 +35,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from pipeline import ALPRPipeline
 import config
+
+logger = logging.getLogger(__name__)
 
 
 def parse_args():
@@ -130,7 +133,7 @@ def process_images(pipeline: ALPRPipeline, image_paths: list):
 
     for path in image_paths:
         if not Path(path).exists():
-            print(f"[!] Bestand niet gevonden: {path}")
+            logger.warning("Bestand niet gevonden: %s", path)
             continue
 
         results = pipeline.process_image(path)
@@ -145,7 +148,7 @@ def process_image_dir(pipeline: ALPRPipeline, dir_path: str):
     image_dir = Path(dir_path)
 
     if not image_dir.is_dir():
-        print(f"[!] Map niet gevonden: {dir_path}")
+        logger.warning("Map niet gevonden: %s", dir_path)
         return {}
 
     image_paths = sorted([
@@ -154,10 +157,10 @@ def process_image_dir(pipeline: ALPRPipeline, dir_path: str):
     ])
 
     if not image_paths:
-        print(f"[!] Geen afbeeldingen gevonden in: {dir_path}")
+        logger.warning("Geen afbeeldingen gevonden in: %s", dir_path)
         return {}
 
-    print(f"[Pipeline] {len(image_paths)} afbeeldingen gevonden in {dir_path}")
+    logger.info("%d afbeeldingen gevonden in %s", len(image_paths), dir_path)
     return process_images(pipeline, image_paths)
 
 
@@ -230,7 +233,7 @@ def main():
         pipeline.process_video(0, args.output_video)
 
     total_time = time.time() - start_time
-    print(f"\nTotale verwerkingstijd: {total_time:.2f}s")
+    logger.info("Totale verwerkingstijd: %.2fs", total_time)
 
 
 if __name__ == "__main__":

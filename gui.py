@@ -244,6 +244,7 @@ class ALPRApp(ctk.CTk):
         self.current_results = []
         self.all_results_history = []   # Geschiedenis van alle detecties
         self.video_running = False
+        self.video_paused = False
         self.video_cap = None
         self._after_id = None
         self._scan_cancelled = False
@@ -271,7 +272,15 @@ class ALPRApp(ctk.CTk):
     def _toggle_video_pause(self, event=None):
         """Pauzeer/hervat video als de videopagina actief is."""
         if self.video_running and self.video_cap:
-            pass # TODO: Implementeer video pause logic
+            self.video_paused = not self.video_paused
+            if self.video_paused:
+                if self._after_id:
+                    self.after_cancel(self._after_id)
+                    self._after_id = None
+                self._dev_log("[Video] Gepauzeerd", "info")
+            else:
+                self._dev_log("[Video] Hervat", "info")
+                self._process_video_frame()
 
     def _bind_scroll_events(self, scrollable_frame):
         """
@@ -1295,6 +1304,7 @@ class ALPRApp(ctk.CTk):
         self.dev_mode = saved_dev_mode
         self._dev_log_entries = saved_dev_logs
         self.video_running = False
+        self.video_paused = False
         self.video_cap = None
         self._after_id = None
         self._scan_cancelled = False
@@ -1785,6 +1795,8 @@ class ALPRApp(ctk.CTk):
         if self.video_running:
             self._stop_video()
 
+        self.video_paused = False
+
         try:
             if isinstance(source, int) and sys.platform == "darwin":
                 self.video_cap = cv2.VideoCapture(source, cv2.CAP_AVFOUNDATION)
@@ -1819,6 +1831,9 @@ class ALPRApp(ctk.CTk):
     def _process_video_frame(self):
         """Verwerk één video frame (wordt herhaaldelijk aangeroepen)."""
         if not self.video_running or self.video_cap is None:
+            return
+
+        if self.video_paused:
             return
 
         try:
@@ -1916,6 +1931,7 @@ class ALPRApp(ctk.CTk):
     def _stop_video(self):
         """Stop video verwerking."""
         self.video_running = False
+        self.video_paused = False
 
         if self._after_id:
             self.after_cancel(self._after_id)

@@ -368,6 +368,14 @@ class ALPRPipeline:
         # Stap 4: Preprocessing + OCR op gefilterde detecties
         results = []
         for idx, (det, color) in enumerate(zip(filtered_detections, filtered_colors)):
+            # Scherptecheck: sla wazige platen over (alleen bij live camera relevant)
+            if config.SHARPNESS_MIN_VARIANCE > 0:
+                sharpness = self.preprocessor.measure_sharpness(det.cropped_image)
+                self._log(f"[Scherpte] Plaat {idx+1}: {sharpness:.1f} (drempel: {config.SHARPNESS_MIN_VARIANCE})", "step")
+                if sharpness < config.SHARPNESS_MIN_VARIANCE:
+                    self._log(f"[Scherpte] Plaat {idx+1} overgeslagen (te wazig: {sharpness:.1f})", "warning")
+                    continue
+
             # Preprocessing (meerdere varianten)
             self._progress("progress_preprocessing")
             self._log(f"[Preprocessing] Plaat {idx+1}: varianten genereren...", "step")
@@ -387,6 +395,11 @@ class ALPRPipeline:
                       "success" if plate_text and len(plate_text) >= 4 else "warning")
 
             if plate_text and len(plate_text) >= 4:
+                # Verwerp resultaten die niet op een geldig NL-patroon lijken
+                if config.REQUIRE_NL_PATTERN and not self.ocr.matches_nl_pattern(plate_text):
+                    self._log(f"[Pipeline] '{plate_text}' verworpen: geen geldig NL-kentekenpatroon", "warning")
+                    continue
+
                 result = PlateResult(
                     plate_text=plate_text,
                     detection_confidence=det.confidence,
