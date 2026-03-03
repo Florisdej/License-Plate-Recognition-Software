@@ -21,6 +21,9 @@ import cv2
 import time
 import threading
 import queue
+import subprocess
+import json
+import re
 import numpy as np
 from pathlib import Path
 from datetime import datetime
@@ -246,6 +249,8 @@ class ALPRApp(ctk.CTk):
         self.video_running = False
         self.video_paused = False
         self.video_cap = None
+        self._selected_camera = 0       # Currently selected camera index
+        self._system_cameras = self._get_system_cameras()  # [(index, name), ...]
         self._after_id = None
         self._scan_cancelled = False
         self.dev_mode = config.DEV_MODE
@@ -691,6 +696,33 @@ class ALPRApp(ctk.CTk):
             command=self._load_video,
         )
         self.btn_load_video.pack(side="right", padx=4, pady=11)
+
+        # ─── Camera selector dropdown ───
+        camera_names = [name for _, name in self._system_cameras]
+        default_name = camera_names[0] if camera_names else "No camera"
+        self.camera_dropdown_var = ctk.StringVar(value=default_name)
+        self.camera_dropdown = ctk.CTkOptionMenu(
+            toolbar,
+            variable=self.camera_dropdown_var,
+            values=camera_names if camera_names else ["No camera"],
+            font=ctk.CTkFont(size=13),
+            fg_color=Colors.BG_LIGHT, button_color=Colors.BG_CARD,
+            button_hover_color=Colors.ACCENT,
+            width=200, height=34, corner_radius=8,
+            command=self._on_camera_selected,
+        )
+        self.camera_dropdown.pack(side="right", padx=4, pady=11)
+        if self._system_cameras:
+            self._selected_camera = self._system_cameras[0][0]
+
+        self.btn_refresh_cameras = ctk.CTkButton(
+            toolbar, text="⟳",
+            font=ctk.CTkFont(size=16),
+            fg_color=Colors.BG_LIGHT, hover_color=Colors.BG_CARD,
+            width=34, height=34, corner_radius=8,
+            command=self._refresh_cameras,
+        )
+        self.btn_refresh_cameras.pack(side="right", padx=(4, 0), pady=11)
 
         # ─── Video Canvas ───
         video_canvas_frame = ctk.CTkFrame(page, fg_color=Colors.BG_DARK)
@@ -1754,37 +1786,95 @@ class ALPRApp(ctk.CTk):
         if path:
             self._start_video_source(path)
 
-    def _start_camera(self):
-        """Start live camera feed. (Slim zoeken naar werkende camera)"""
-        self._dev_log("[Camera] Zoeken naar werkende camera...", "info")
-        best_cam = 0
-        
-        # Op Mac kunnen camera 0 of 1 virtueel zijn of Continuity Camera's die falen
-        for i in range(3):
+    @staticmethod
+    def _get_system_cameras():
+        """Get connected cameras with real names from the OS (no OpenCV)."""
+        cameras = []
+        if sys.platform == "darwin":
+            # Use ffmpeg to query AVFoundation — gives correct indices matching OpenCV
             try:
-                if sys.platform == "darwin":
-                    cap = cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
-                else:
-                    cap = cv2.VideoCapture(i)
-                    
-                if cap.isOpened():
-                    # Warmup probeer 5 frames i.v.m. Mac startup
-                    ret = False
-                    for _ in range(5):
-                        ret, f = cap.read()
-                        if ret and f is not None:
-                            break
-                        time.sleep(0.1)
-                    
-                    cap.release()
-                    if ret:
-                        best_cam = i
-                        self._dev_log(f"[Camera] Gevonden op index {i}", "success")
+                result = subprocess.run(
+                    ["ffmpeg", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
+                    capture_output=True, text=True, timeout=5,
+                )
+                # Device list is on stderr; parse lines like: [AVFoundation ...] [0] Device Name
+                in_video = False
+                for line in result.stderr.splitlines():
+                    if "AVFoundation video devices:" in line:
+                        in_video = True
+                        continue
+                    if "AVFoundation audio devices:" in line:
                         break
-            except Exception as e:
-                self._dev_log(f"[Camera] Fout bij testen index {i}: {e}", "warning")
-                
-        self._start_video_source(best_cam)
+                    if in_video:
+                        # Match lines like: [AVFoundation indev @ ...] [0] MacBook Pro Camera
+                        m = re.search(r"\[(\d+)\]\s+(.+)$", line)
+                        if m:
+                            idx = int(m.group(1))
+                            name = m.group(2).strip()
+                            # Skip screen capture devices
+                            if "capture screen" not in name.lower():
+                                cameras.append((idx, name))
+            except FileNotFoundError:
+                pass  # ffmpeg not installed
+            except Exception:
+                pass
+
+            # Fallback: system_profiler (names may not match OpenCV index order)
+            if not cameras:
+                try:
+                    result = subprocess.run(
+                        ["system_profiler", "SPCameraDataType", "-json"],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    data = json.loads(result.stdout)
+                    for i, cam in enumerate(data.get("SPCameraDataType", [])):
+                        name = cam.get("_name", f"Camera {i}")
+                        cameras.append((i, name))
+                except Exception:
+                    pass
+        else:
+            # Linux / Raspberry Pi — read from sysfs
+            try:
+                sysfs = Path("/sys/class/video4linux")
+                if sysfs.exists():
+                    seen_names = set()
+                    for dev in sorted(sysfs.iterdir()):
+                        name_file = dev / "name"
+                        if name_file.exists():
+                            idx = int(dev.name.replace("video", ""))
+                            name = name_file.read_text().strip()
+                            if name not in seen_names:
+                                seen_names.add(name)
+                                cameras.append((idx, name))
+            except Exception:
+                pass
+
+        if not cameras:
+            cameras.append((0, "Camera 0"))
+        return cameras
+
+    def _on_camera_selected(self, choice):
+        """Handle camera selection from dropdown."""
+        for idx, name in self._system_cameras:
+            if name == choice:
+                self._selected_camera = idx
+                self._dev_log(f"[Camera] Geselecteerd: {name}", "info")
+                return
+
+    def _refresh_cameras(self):
+        """Re-detect cameras (e.g. after plugging in a new one)."""
+        self._system_cameras = self._get_system_cameras()
+        camera_names = [name for _, name in self._system_cameras]
+        self.camera_dropdown.configure(values=camera_names if camera_names else ["No camera"])
+        if camera_names:
+            self.camera_dropdown_var.set(camera_names[0])
+            self._selected_camera = self._system_cameras[0][0]
+        self._dev_log(f"[Camera] {len(self._system_cameras)} camera('s) gevonden", "info")
+
+    def _start_camera(self):
+        """Start live camera feed with selected camera."""
+        self._dev_log(f"[Camera] Starten camera index {self._selected_camera}...", "info")
+        self._start_video_source(self._selected_camera)
 
     def _start_video_source(self, source):
         """Start video verwerking van een bron (pad of camera index)."""
@@ -1798,10 +1888,7 @@ class ALPRApp(ctk.CTk):
         self.video_paused = False
 
         try:
-            if isinstance(source, int) and sys.platform == "darwin":
-                self.video_cap = cv2.VideoCapture(source, cv2.CAP_AVFOUNDATION)
-            else:
-                self.video_cap = cv2.VideoCapture(source)
+            self.video_cap = cv2.VideoCapture(source)
         except Exception as e:
             messagebox.showerror(t("dialog_error_title"), f"{t('dialog_video_error')}\n{str(e)}")
             return
@@ -1929,7 +2016,7 @@ class ALPRApp(ctk.CTk):
         )
 
     def _stop_video(self):
-        """Stop video verwerking."""
+        """Stop video verwerking en reset de video tab."""
         self.video_running = False
         self.video_paused = False
 
@@ -1941,10 +2028,27 @@ class ALPRApp(ctk.CTk):
             self.video_cap.release()
             self.video_cap = None
 
+        # Reset canvas to placeholder
+        self.video_canvas.delete("all")
+        self.video_canvas.create_text(
+            self.video_canvas.winfo_width() // 2 or 400,
+            self.video_canvas.winfo_height() // 2 or 300,
+            text=t("placeholder_video"),
+            fill=Colors.TEXT_MUTED, font=("Helvetica", 14),
+            tags="placeholder",
+        )
+
+        # Clear detected plates list
+        for w in self.video_results_scroll.winfo_children():
+            w.destroy()
+        self.video_plates_found = set()
+
+        # Reset stats
         self.btn_stop_video.configure(state="disabled")
         self.btn_load_video.configure(state="normal")
         self.btn_camera.configure(state="normal")
         self.vid_stat_fps.set_value("-")
+        self.vid_stat_plates.set_value("0")
         self._dev_log("[Video] Gestopt", "info")
 
     def _on_frame_skip_change(self, value):
@@ -2142,6 +2246,8 @@ def main():
 
     if args.dev:
         config.DEV_MODE = True
+
+    config.setup_logging()
 
     app = ALPRApp(model_path=args.model)
     app.mainloop()

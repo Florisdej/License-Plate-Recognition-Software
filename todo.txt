@@ -1,0 +1,77 @@
+ALPR System — Todo
+==================
+
+BUGS / FIXES
+------------
+
+1. [gui_video_controller.py:370] Dead stub: _toggle_video_pause in the mixin
+   contains only `pass  # TODO`, but gui.py:277 has a working override.
+   The mixin stub is never called due to MRO but causes confusion. Either
+   remove the stub from the mixin or move the real implementation there.
+
+2. [gui_settings_controller.py:46] Duplicate `settings_scroll.grid(...)` call
+   — the same line is called twice in a row. Remove the duplicate.
+
+3. [main.py] Uses bare print() throughout instead of the logger set up by
+   config.setup_logging(). Inconsistent with the rest of the codebase where
+   all modules use logging.getLogger(__name__).
+
+4. [config.py / pipeline.py] VEHICLE_MODE ("car", "scooter", "both") is
+   defined in config but never checked anywhere in the pipeline or
+   color_filter. The setting is a no-op. Either implement it or remove it.
+
+5. [gui.py] GUI does not call config.setup_logging() at startup. If the app
+   is launched via gui.py directly (python gui.py), logging is unconfigured.
+   main.py does call it, but gui.py is an independent entry point.
+
+
+MISSING FEATURES
+----------------
+
+6. Config persistence: Settings changed in the GUI (confidence sliders,
+   frame skip, color mode, etc.) are not saved to disk and reset on restart.
+   Add a simple JSON config file (e.g. user_settings.json) that is loaded on
+   startup and written on change or on exit.
+
+7. OCR result caching: Identical or near-identical plate crops are run
+   through EasyOCR repeatedly. Add an LRU cache keyed by a perceptual hash
+   (e.g. imagehash.phash) of the cropped image to skip redundant OCR calls.
+   Especially useful for video mode where the same plate appears across many
+   frames.
+
+8. JSON export for history: The history page only has CSV export. Add a
+   second "Export JSON" button so results can be consumed by other tools
+   without parsing CSV.
+
+9. Visual pause button: Video pause is only reachable via the spacebar. Users
+   on touchscreens or unfamiliar with the shortcut have no way to pause. Add
+   a pause/resume button in the video toolbar next to the Stop button.
+
+10. Keyboard shortcut help: Several shortcuts exist (Space, Cmd/Ctrl+O) but
+    are undocumented in the UI. Add a small "?" button or Help menu that
+    lists them.
+
+
+ARCHITECTURE / QUALITY
+-----------------------
+
+11. No tests: Zero unit or integration tests exist. At minimum, add tests for:
+    - config.validate() edge cases
+    - ocr_engine post-processing / char corrections
+    - preprocessor size guards and binarize clamping
+    - NL_PLATE_PATTERNS regex matching
+
+12. No requirements.txt / pyproject.toml: Reproducible installs are
+    impossible without a dependency file. Add one listing at least:
+    ultralytics, easyocr, opencv-python, customtkinter, Pillow, numpy.
+
+13. gui.py is still ~2100 lines despite the controller mixins being extracted.
+    The remaining god-object logic (init, nav, dev console, pipeline loading,
+    callback queue) should be further split. Consider extracting a
+    DevConsoleControllerMixin and a PipelineLoaderMixin.
+
+14. [pipeline.py] process_image and process_video share no common frame-
+    processing path. _process_frame is internal to the video loop but an
+    identical sequence runs inside process_image. Extract a single
+    process_frame_array helper used by both (or verify the existing one
+    covers all cases).
