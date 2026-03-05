@@ -6,3 +6,5 @@ output/
 runs/
 .claude/
 model/
+!alpr_rpi4/model/
+!alpr_rpi4/model/*.onnx
