@@ -1,0 +1,27 @@
+# ALPR System — RPi4 Requirements
+# =================================
+# Install CPU-only PyTorch FIRST (before this file):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#
+# Then install this file:
+#   pip install -r requirements_rpi4.txt
+
+# Core detection (CPU mode)
+ultralytics>=8.0.0
+
+# Image processing
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# OCR
+easyocr>=1.7.0
+
+# ONNX inference (faster than PyTorch on ARM)
+onnxruntime>=1.16.0
+
+# Web dashboard
+flask>=3.0.0
+
+# Pi Camera Module (only on aarch64 / RPi OS)
+picamera2>=0.3.0; platform_machine=="aarch64"

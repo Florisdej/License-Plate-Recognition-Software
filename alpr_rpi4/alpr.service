@@ -1,0 +1,16 @@
+[Unit]
+Description=ALPR System — License Plate Recognition
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/alpr_rpi4
+ExecStart=/home/pi/alpr_env/bin/python main.py --camera 0 --web --service
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
