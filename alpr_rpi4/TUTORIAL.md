@@ -24,11 +24,14 @@ From your development machine, copy the `alpr_rpi4/` folder to the Pi:
 scp -r alpr_rpi4/ pi@<your-pi-ip>:~/alpr_rpi4
 ```
 
-Or clone the full repository on the Pi and navigate to the folder:
+Or clone only the `alpr_rpi4/` folder (faster — skips the rest of the repo):
 
 ```bash
-git clone https://github.com/Florisdej/License-Plate-Recognition-Software.git
-cd License-Plate-Recognition-Software/alpr_rpi4
+git clone --filter=blob:none --sparse https://github.com/Florisdej/License-Plate-Recognition-Software.git
+cd License-Plate-Recognition-Software
+git sparse-checkout set alpr_rpi4
+git checkout v2
+cd alpr_rpi4
 ```
 
 ---
@@ -100,17 +103,22 @@ python main.py --camera 0 --web
 
 ## Step 6 — Run with Pi Camera Module (optional)
 
-Enable the camera interface first:
+The Pi Camera Module works via **picamera2 + libcamera** — no legacy camera stack needed.
+The setup script installs the required system packages automatically on aarch64.
 
-```bash
-sudo raspi-config
-# Interface Options → Camera → Enable
-```
+> **Bookworm note:** the old `raspi-config → Interface Options → Camera` toggle no longer exists and is not required. libcamera auto-detects the camera.
 
-Then run:
+Run:
 
 ```bash
 python main.py --picamera2 --web
+```
+
+If you see `No module named 'libcamera'`, the system packages were not installed.
+Fix it with:
+
+```bash
+sudo apt-get install -y python3-picamera2 python3-libcamera python3-kms++
 ```
 
 ---
@@ -182,10 +190,16 @@ All settings are in `config.py`. Key RPi4 options:
 
 ## Troubleshooting
 
-**`No module named 'picamera2'`**
-Only available on Raspberry Pi OS. Install with:
+**`No module named 'picamera2'` or `No module named 'libcamera'`**
+The picamera2/libcamera Python bindings must come from the system repo, not pip.
+Install with:
 ```bash
-pip install picamera2
+sudo apt-get install -y python3-picamera2 python3-libcamera python3-kms++
+```
+Then re-create the virtual environment so it picks up the system packages:
+```bash
+rm -rf ~/alpr_env
+bash setup_rpi4.sh
 ```
 
 **`Cannot open camera 0`**

@@ -25,14 +25,25 @@ echo "[1/6] Installing system packages..."
 sudo apt-get update -qq
 sudo apt-get install -y \
     python3 python3-pip python3-venv \
-    libopencv-dev \
-    libatlas-base-dev \
+    libopenblas-dev \
     libjpeg-dev libpng-dev libtiff-dev \
     libhdf5-dev \
     libgl1 \
     libglib2.0-0 \
     git \
     -qq
+
+# On aarch64 (RPi4), install picamera2 and libcamera from the system repo.
+# The libcamera Python bindings cannot be pip-installed; they must come from apt.
+if [ "$(uname -m)" = "aarch64" ]; then
+    echo "  Installing picamera2 system packages (aarch64)..."
+    sudo apt-get install -y \
+        python3-picamera2 \
+        python3-libcamera \
+        python3-kms++ \
+        -qq || echo "  Warning: picamera2 system packages not available — Pi Camera Module will not work."
+fi
+
 echo "  System packages installed."
 
 # ------------------------------------------------------------------
@@ -40,7 +51,9 @@ echo "  System packages installed."
 # ------------------------------------------------------------------
 echo "[2/6] Creating virtual environment at $VENV_DIR..."
 if [ ! -d "$VENV_DIR" ]; then
-    python3 -m venv "$VENV_DIR"
+    # --system-site-packages lets the venv access system-installed packages
+    # such as python3-picamera2 and python3-libcamera (apt-only on RPi OS).
+    python3 -m venv --system-site-packages "$VENV_DIR"
     echo "  Virtual environment created."
 else
     echo "  Virtual environment already exists — skipping."
@@ -53,9 +66,10 @@ pip install --upgrade pip -q
 # 3. CPU-only PyTorch
 # ------------------------------------------------------------------
 echo "[3/6] Installing CPU-only PyTorch (this may take several minutes)..."
-pip install torch torchvision \
-    --index-url https://download.pytorch.org/whl/cpu \
-    -q
+# Install from PyPI — it carries official aarch64 Linux wheels (CPU-only on ARM).
+# Do NOT use --index-url https://download.pytorch.org/whl/cpu: that index only
+# has x86_64 wheels and will fail on RPi4 (aarch64).
+pip install torch torchvision -q
 echo "  PyTorch installed."
 
 # ------------------------------------------------------------------
