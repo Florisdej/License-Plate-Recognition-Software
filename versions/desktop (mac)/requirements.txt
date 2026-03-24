@@ -1,0 +1,22 @@
+# ALPR Systeem - Dependencies
+# Installeer met: pip install -r requirements.txt
+
+# Core
+ultralytics>=8.0.0          # YOLOv8 voor kentekendetectie
+opencv-python-headless>=4.8 # Beeldverwerking (headless voor Pi/SSH)
+numpy>=1.24                 # Numerieke berekeningen
+
+# OCR
+easyocr>=1.7                # Neural OCR engine
+
+# EasyOCR dependencies (worden automatisch geïnstalleerd)
+# torch                     # PyTorch (CPU versie voor Pi)
+# torchvision               # Vision utilities
+
+# GUI
+customtkinter>=5.2         # Moderne Tkinter GUI
+Pillow>=10.0               # Beeldverwerking voor GUI
+
+# Optioneel - voor Pi-specifieke optimalisatie:
+# onnxruntime              # ONNX Runtime voor snellere inference
+# tflite-runtime           # TensorFlow Lite runtime
